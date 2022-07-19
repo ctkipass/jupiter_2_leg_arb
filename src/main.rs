@@ -14,8 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let signer = jupiter_aggregator::setup_wallet("C:/Users/Chris/.config/solana/id2.json");
 
-    let client = jupiter_aggregator::setup_rpc_client("https://ssc-dao.genesysgo.net");
-
+    let client = jupiter_aggregator::setup_rpc_client("https://purple-restless-flower.solana-mainnet.quiknode.pro/b46193c4bdb2b84998212ba6f72350535df1f458/");
     let base_token = user_input.input_token;
 
     let route_map = jupiter_aggregator::api::route_map(false).await?;
@@ -33,78 +32,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("Get Balance Error: {:?}", e),
     }
 
-   'search_arb: loop {
+    'search_arb: loop {
         //Get the best quote
+        println!("{}", "Restarted search!");
         match jupiter_aggregator::find_2_leg_arb(&all_routes_for_input_token, user_input.input_token, balance, user_input.slippage, user_input.profit).await {
-            Ok(quotes) => {
+            Ok(mut quotes) => {
 
-                match jupiter_aggregator::get_swap_transactions(quotes[0].clone(), signer.pubkey()).await {
-                    Ok(txns) => {
-                        match jupiter_aggregator::execute_swap(&client, txns, &signer).await {
-                            Ok(swap) => {
-                                match jupiter_aggregator::get_swap_transactions(quotes[1].clone(), signer.pubkey()).await {
-                                    Ok(txns) => {
-                                        match jupiter_aggregator::execute_swap(&client, txns, &signer).await {
-                                            Ok(swap) => {
-                                                println!("Executed second leg....: {}", swap);
-                                                println!("{}", "Getting updated base token balance....");
-                                                match jupiter_aggregator::get_token_balance(&client, base_token.pub_key, &signer.pubkey()).await {
-                                                    Ok(answer) => {
-                                                        balance = answer;
-                                                        println!("Updated balance after successful arb: {}", balance);
-                                                        continue 'search_arb
-                                                    }
-                                                    Err(e) => panic!("{}", "Failed to get token balance after successful arb...."),
-                                                }
-                                            }
-                                            Err(e) => {
-                                                println!("Second leg swap failed.... Getting new quote and reverting first leg...");
-
-                                                match jupiter_aggregator::revert_swap(&client, quotes[0].market_infos[quotes[0].market_infos.len()-1].output_mint, user_input.input_token.pub_key, &signer).await {
-                                                    Ok(rev_sig) => {
-                                                        println!("{} Revert swap succeeded... Getting base token balance....", rev_sig);
-                                                        match jupiter_aggregator::get_token_balance(&client, base_token.pub_key, &signer.pubkey()).await {
-                                                            Ok(answer) => {
-                                                                balance = answer;
-                                                                println!("Updated balance after reverted swap: {}", balance)
-                                                            }
-                                                            Err(e) => panic!("{}", "Failed to get token balance after reverting swap...."),
-                                                        }
-                                                    }
-                                                    Err(e) => panic!("Failed to revert swap...."),
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        println!("Failed to get swap transactions for second leg.... Getting new quote and reverting first leg...");
-
-                                        match jupiter_aggregator::revert_swap(&client, quotes[0].market_infos[0].output_mint, user_input.input_token.pub_key, &signer).await {
-                                            Ok(rev_sig) => {
-                                                println!("{} Revert swap succeeded... Getting base token balance....", rev_sig);
-                                                match jupiter_aggregator::get_token_balance(&client, base_token.pub_key, &signer.pubkey()).await {
-                                                    Ok(answer) => {
-                                                        balance = answer;
-                                                        println!("Updated balance after reverted swap: {}", balance)
-                                                    }
-                                                    Err(_) => panic!("{}", "Failed to get token balance after reverting swap...."),
-                                                }
-                                            }
-                                            Err(_) => panic!("Failed to revert swap...."),
-                                        }
-                                    }
-                                }
-                            }
-                            Err(swap_error) => {
-                                println!("Failed to execute first leg.... Starting over...: {:?}", swap_error);
-                                continue 'search_arb
-                            },
-                        }
-                    }
-                    Err(swap_data_error) => {
-                        println!("Failed to get swap transaction data for first leg... Starting over...: {:?}", swap_data_error);
-                        continue 'search_arb
-                    }
+                match jupiter_aggregator::execute_2_leg_swap(&client, &mut quotes, &signer, user_input.input_token.pub_key).await {
+                    Ok(result) => {
+                        balance = result;
+                        println!("Updated balance successful arb: {}", balance);
+                    },
+                    Err(e) => println!("Failed to execute swap...{:?}",e),
                 }
             }
             Err(e) => {
